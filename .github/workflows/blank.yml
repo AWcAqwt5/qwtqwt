@@ -117,8 +117,8 @@ env:
 
 jobs:
   register:
-    # 不再依赖 prepare job（它曾在排队阶段被取消，导致整轮 skipped）
-    if: ${{ matrix.index < fromJSON(github.event.inputs.job_count || '1') }}
+    # 注意：job 级 if 不能引用 matrix（matrix 此刻还未展开），
+    # 因此 job_count 的限制放到每个 step 上判断（见各 step 的 if）。
     strategy:
       fail-fast: false
       matrix:
@@ -129,6 +129,7 @@ jobs:
     steps:
       # 拉取代码仓库的最新代码
       - name: Fetch source code
+        if: ${{ matrix.index < fromJSON(inputs.job_count || '256') }}
         uses: actions/checkout@v4
         with:
           repository: xbox-cn/twitch-reg-test
@@ -136,15 +137,18 @@ jobs:
           path: code
 
       - name: Setup Python
+        if: ${{ matrix.index < fromJSON(inputs.job_count || '256') }}
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: pip
 
       - name: Install dependencies
+        if: ${{ matrix.index < fromJSON(inputs.job_count || '256') }}
         run: pip install -r code/requirements.txt
 
       - name: Install OpenVPN (VPNGate 出口需要)
+        if: ${{ matrix.index < fromJSON(inputs.job_count || '256') }}
         shell: pwsh
         run: |
           $exe = 'C:\Program Files\OpenVPN\bin\openvpn.exe'
@@ -160,18 +164,19 @@ jobs:
       # 预热 Clash 内核：提前下载 mihomo 并执行一次（触发杀软扫描/页缓存），
       # 避免 run.py 首次启动 58MB 新 exe 时卡在初始化（实测偶发 60s 不就绪）
       - name: Warm up Clash core
-        if: ${{ env.CLASH_SUB_URL != '' }}
+        if: ${{ env.CLASH_SUB_URL != '' && matrix.index < fromJSON(inputs.job_count || '256') }}
         continue-on-error: true
         run: python clash_proxy.py --warmup
         working-directory: code
 
       # Camoufox(Firefox)：下载反检测内核（仅在选用 camoufox 时执行）
       - name: Fetch Camoufox browser
-        if: ${{ inputs.browser_engine == 'camoufox' }}
+        if: ${{ inputs.browser_engine == 'camoufox' && matrix.index < fromJSON(inputs.job_count || '256') }}
         continue-on-error: true
         run: python -m camoufox fetch
 
       - name: Run registration
+        if: ${{ matrix.index < fromJSON(inputs.job_count || '256') }}
         shell: pwsh
         run: |
           cd code
@@ -188,7 +193,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "注册失败(退出码 $LASTEXITCODE)" }
 
       - name: Upload logs
-        if: always()
+        if: ${{ always() && matrix.index < fromJSON(inputs.job_count || '256') }}
         uses: actions/upload-artifact@v4
         with:
           name: logs-${{ matrix.index }}-${{ github.run_id }}
